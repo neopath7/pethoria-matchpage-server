@@ -8,10 +8,30 @@ const requestIp = require('request-ip');
 const axios = require('axios');
 const geolib = require('geolib');
 const jwt = require('jsonwebtoken');
+const { OAuth2Client } = require('google-auth-library');
+const multer = require('multer');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 8000;
+
+// Google OAuth client
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// Configure multer for file uploads
+const storage = multer.memoryStorage();
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  }
+});
 
 // Middleware
 app.use(helmet());
@@ -33,12 +53,15 @@ mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch(err => console.error('MongoDB connection error:', err));
 
-// User Schema
+// Enhanced User Schema
 const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
+  password: { type: String }, // Optional for OAuth users
   name: { type: String, required: true },
-  age: { type: Number, required: true },
+  username: { type: String, unique: true, sparse: true },
+  age: { type: Number },
+  birthday: { type: Date },
+  gender: { type: String, enum: ['male', 'female', 'other'] },
   location: {
     type: { type: String, enum: ['Point'], default: 'Point' },
     coordinates: { type: [Number], required: true }, // [longitude, latitude]
@@ -61,10 +84,40 @@ const userSchema = new mongoose.Schema({
     images: [String],
     isActive: { type: Boolean, default: true }
   }],
+  profilePicture: String,
+  coverPhoto: String,
   profileImages: [String],
   bio: String,
+  interests: [String],
+  favoriteAnimal: String,
+  
+  // Social media links
+  instagram: String,
+  facebook: String,
+  twitter: String,
+  
+  // Account status
   isSubscribed: { type: Boolean, default: false },
+  isVerified: { type: Boolean, default: false },
   lastActive: { type: Date, default: Date.now },
+  
+  // ID Verification
+  idVerificationStatus: { 
+    type: String, 
+    enum: ['not_submitted', 'pending', 'approved', 'rejected'], 
+    default: 'not_submitted' 
+  },
+  idVerificationUploadedAt: Date,
+  idVerificationRejectionReason: String,
+  
+  // OAuth info
+  googleId: String,
+  
+  // Points and badges
+  points: { type: Number, default: 0 },
+  badges: [String],
+  
+  // Matching data
   swipedProfiles: [{
     profileId: mongoose.Schema.Types.ObjectId,
     action: { type: String, enum: ['like', 'pass', 'superlike'] },
@@ -132,7 +185,334 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// Routes
+// Helper function to generate JWT token
+const generateToken = (userId, email) => {
+  return jwt.sign(
+    { userId, email },
+    process.env.JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+};
+
+// ==================== AUTHENTICATION ROUTES ====================
+
+// Google OAuth authentication
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    const { credential } = req.body;
+    
+    if (!credential) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Google credential is required' 
+      });
+    }
+
+    // Verify the Google token
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    
+    const payload = ticket.getPayload();
+    const { sub: googleId, email, name, picture } = payload;
+
+    if (!email || !name) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid Google account data' 
+      });
+    }
+
+    // Check if user already exists
+    let user = await User.findOne({ 
+      $or: [{ email }, { googleId }] 
+    });
+
+    if (user) {
+      // Update existing user
+      user.googleId = googleId;
+      user.lastActive = new Date();
+      if (picture && !user.profilePicture) {
+        user.profilePicture = picture;
+      }
+      await user.save();
+    } else {
+      // Create new user with default location
+      const defaultLocation = await getLocationFromIP('8.8.8.8'); // Default to fallback location
+      
+      user = new User({
+        email,
+        name,
+        googleId,
+        profilePicture: picture,
+        location: {
+          type: 'Point',
+          coordinates: defaultLocation.coordinates,
+          address: defaultLocation.address,
+          city: defaultLocation.city,
+          state: defaultLocation.state,
+          country: defaultLocation.country
+        },
+        points: 50, // Welcome bonus
+        lastActive: new Date()
+      });
+      
+      await user.save();
+    }
+
+    // Generate JWT token
+    const token = generateToken(user._id, user.email);
+
+    res.json({
+      success: true,
+      message: 'Authentication successful',
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        profilePicture: user.profilePicture,
+        isSubscribed: user.isSubscribed,
+        points: user.points
+      }
+    });
+
+  } catch (error) {
+    console.error('Google OAuth error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Authentication failed' 
+    });
+  }
+});
+
+// ==================== PROFILE ROUTES ====================
+
+// Get user profile
+app.get('/api/profile/me', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        username: user.username,
+        age: user.age,
+        birthday: user.birthday,
+        gender: user.gender,
+        bio: user.bio,
+        profilePicture: user.profilePicture,
+        coverPhoto: user.coverPhoto,
+        location: user.location?.address,
+        interests: user.interests,
+        favoriteAnimal: user.favoriteAnimal,
+        instagram: user.instagram,
+        facebook: user.facebook,
+        twitter: user.twitter,
+        isSubscribed: user.isSubscribed,
+        isVerified: user.isVerified,
+        points: user.points,
+        badges: user.badges,
+        petCount: user.pets?.length || 0,
+        idVerificationStatus: user.idVerificationStatus,
+        idVerificationUploadedAt: user.idVerificationUploadedAt,
+        idVerificationRejectionReason: user.idVerificationRejectionReason,
+        createdAt: user.createdAt,
+        lastActive: user.lastActive
+      }
+    });
+
+  } catch (error) {
+    console.error('Get profile error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get profile' 
+    });
+  }
+});
+
+// Update user profile
+app.put('/api/profile/update', authenticateToken, upload.single('profilePicture'), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const updateData = {};
+
+    // Handle text fields
+    const allowedFields = [
+      'name', 'username', 'age', 'birthday', 'gender', 'bio', 
+      'interests', 'favoriteAnimal', 'instagram', 'facebook', 'twitter'
+    ];
+
+    allowedFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        updateData[field] = req.body[field];
+      }
+    });
+
+    // Handle interests array
+    if (req.body.interests) {
+      if (typeof req.body.interests === 'string') {
+        updateData.interests = req.body.interests.split(',').map(i => i.trim());
+      } else if (Array.isArray(req.body.interests)) {
+        updateData.interests = req.body.interests;
+      }
+    }
+
+    // Handle file upload
+    if (req.file) {
+      // For now, we'll store as base64 - in production, use cloud storage
+      const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+      updateData.profilePicture = base64Image;
+    }
+
+    // Update last active
+    updateData.lastActive = new Date();
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      updateData,
+      { new: true, select: '-password' }
+    );
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: {
+        id: user._id,
+        name: user.name,
+        profilePicture: user.profilePicture,
+        bio: user.bio,
+        interests: user.interests
+      }
+    });
+
+  } catch (error) {
+    console.error('Update profile error:', error);
+    
+    if (error.code === 11000) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Username already taken' 
+      });
+    }
+
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to update profile' 
+    });
+  }
+});
+
+// Upload cover photo
+app.put('/api/profile/cover-photo', authenticateToken, upload.single('coverPhoto'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Cover photo file is required' 
+      });
+    }
+
+    // Convert to base64 for storage
+    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+
+    const user = await User.findByIdAndUpdate(
+      req.user.userId,
+      { 
+        coverPhoto: base64Image,
+        lastActive: new Date()
+      },
+      { new: true, select: 'coverPhoto' }
+    );
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Cover photo updated successfully',
+      coverPhoto: user.coverPhoto
+    });
+
+  } catch (error) {
+    console.error('Cover photo upload error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to update cover photo' 
+    });
+  }
+});
+
+// Submit ID verification
+app.post('/api/profile/submit-id-verification', authenticateToken, upload.array('idDocuments', 2), async (req, res) => {
+  try {
+    if (!req.files || req.files.length !== 2) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Please upload both front and back of your ID' 
+      });
+    }
+
+    // In production, upload files to cloud storage and store URLs
+    // For now, we'll just update the verification status
+    
+    const user = await User.findByIdAndUpdate(
+      req.user.userId,
+      {
+        idVerificationStatus: 'pending',
+        idVerificationUploadedAt: new Date(),
+        idVerificationRejectionReason: null,
+        lastActive: new Date()
+      },
+      { new: true, select: 'idVerificationStatus idVerificationUploadedAt' }
+    );
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'ID verification submitted successfully',
+      idVerificationStatus: user.idVerificationStatus,
+      submittedAt: user.idVerificationUploadedAt
+    });
+
+  } catch (error) {
+    console.error('ID verification submission error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to submit ID verification' 
+    });
+  }
+});
+
+// ==================== EXISTING ROUTES ====================
 
 // Get user's location from IP
 app.get('/api/location/ip', async (req, res) => {
@@ -421,5 +801,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on http://0.0.0.0:${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV}`);
   console.log(`MongoDB connected: ${mongoose.connection.readyState === 1 ? 'Yes' : 'No'}`);
+  console.log('🚀 PeThoria Server with Authentication ready!');
+  console.log('📱 Google OAuth integration enabled');
   console.log('🌍 Location-based matching system ready!');
 }); 
