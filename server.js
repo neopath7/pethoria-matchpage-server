@@ -17,7 +17,7 @@ const app = express();
 const PORT = process.env.PORT || 8000;
 
 // Trust proxy - CRITICAL for Koyeb deployment
-app.set('trust proxy', true);
+app.set('trust proxy', 1); // Trust first proxy (Koyeb load balancer)
 
 // Google OAuth client
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -44,12 +44,19 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(requestIp.mw());
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
-});
-app.use(limiter);
+// Rate limiting - TEMPORARILY DISABLED to fix proxy issues
+// const limiter = rateLimit({
+//   windowMs: 15 * 60 * 1000, // 15 minutes
+//   max: 100, // limit each IP to 100 requests per windowMs
+//   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+//   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+//   trustProxy: true, // Trust proxy headers
+//   skip: (req) => {
+//     // Skip rate limiting for health checks
+//     return req.path === '/health';
+//   }
+// });
+// app.use(limiter);
 
 // MongoDB connection
 mongoose.connect(process.env.MONGODB_URI)
