@@ -209,37 +209,57 @@ const generateToken = (userId, email) => {
 // Google OAuth authentication
 app.post('/api/auth/google', async (req, res) => {
   try {
+    console.log('🔍 Google OAuth request received');
+    console.log('📦 Request body:', req.body);
+    
     const { credential } = req.body;
     
     if (!credential) {
+      console.error('❌ No credential provided in request');
       return res.status(400).json({ 
         success: false, 
         message: 'Google credential is required' 
       });
     }
 
+    console.log('🔑 Google credential received, length:', credential.length);
+    console.log('🔧 Google Client ID:', process.env.GOOGLE_CLIENT_ID ? 'Set' : 'NOT SET');
+    
     // Verify the Google token
+    console.log('🔄 Attempting to verify Google token...');
     const ticket = await googleClient.verifyIdToken({
       idToken: credential,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
     
+    console.log('✅ Google token verified successfully');
     const payload = ticket.getPayload();
+    console.log('📋 Token payload:', {
+      sub: payload.sub,
+      email: payload.email,
+      name: payload.name,
+      picture: payload.picture ? 'Present' : 'Not present'
+    });
+    
     const { sub: googleId, email, name, picture } = payload;
 
     if (!email || !name) {
+      console.error('❌ Invalid Google account data - missing email or name');
       return res.status(400).json({ 
         success: false, 
         message: 'Invalid Google account data' 
       });
     }
 
+    console.log('🔍 Searching for existing user with email:', email);
+    
     // Check if user already exists
     let user = await User.findOne({ 
       $or: [{ email }, { googleId }] 
     });
 
     if (user) {
+      console.log('👤 Found existing user:', user._id);
       // Update existing user
       user.googleId = googleId;
       user.lastActive = new Date();
@@ -247,7 +267,9 @@ app.post('/api/auth/google', async (req, res) => {
         user.profilePicture = picture;
       }
       await user.save();
+      console.log('✅ Updated existing user');
     } else {
+      console.log('👤 Creating new user...');
       // Create new user with default location
       const defaultLocation = await getLocationFromIP('8.8.8.8'); // Default to fallback location
       
@@ -269,12 +291,17 @@ app.post('/api/auth/google', async (req, res) => {
       });
       
       await user.save();
+      console.log('✅ Created new user:', user._id);
     }
 
+    console.log('🔐 Generating JWT token...');
+    console.log('🔧 JWT Secret:', process.env.JWT_SECRET ? 'Set' : 'NOT SET');
+    
     // Generate JWT token
     const token = generateToken(user._id, user.email);
+    console.log('✅ JWT token generated, length:', token.length);
 
-    res.json({
+    const responseData = {
       success: true,
       message: 'Authentication successful',
       token,
@@ -286,10 +313,32 @@ app.post('/api/auth/google', async (req, res) => {
         isSubscribed: user.isSubscribed,
         points: user.points
       }
+    };
+    
+    console.log('📤 Sending success response:', {
+      success: responseData.success,
+      message: responseData.message,
+      userEmail: responseData.user.email,
+      userName: responseData.user.name
     });
 
+    res.json(responseData);
+
   } catch (error) {
-    console.error('Google OAuth error:', error);
+    console.error('💥 Google OAuth error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    
+    if (error.message && error.message.includes('Token used too early')) {
+      console.error('⏰ Token timing issue - this is a Google OAuth timing problem');
+    } else if (error.message && error.message.includes('Wrong audience')) {
+      console.error('🎯 Wrong audience - check GOOGLE_CLIENT_ID configuration');
+    } else if (error.message && error.message.includes('Invalid token signature')) {
+      console.error('🔏 Invalid token signature - token may be corrupted');
+    }
+    
     res.status(500).json({ 
       success: false, 
       message: 'Authentication failed' 
