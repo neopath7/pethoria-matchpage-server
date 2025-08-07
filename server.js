@@ -260,12 +260,30 @@ app.post('/api/auth/google', async (req, res) => {
 
     if (user) {
       console.log('👤 Found existing user:', user._id);
+      console.log('📍 Existing user location:', user.location);
+      
       // Update existing user
       user.googleId = googleId;
       user.lastActive = new Date();
       if (picture && !user.profilePicture) {
         user.profilePicture = picture;
       }
+      
+      // CRITICAL FIX: Ensure user has valid location coordinates
+      if (!user.location || !user.location.coordinates || user.location.coordinates.length !== 2) {
+        console.log('🔧 User missing valid coordinates, adding default location...');
+        const defaultLocation = await getLocationFromIP('8.8.8.8');
+        user.location = {
+          type: 'Point',
+          coordinates: defaultLocation.coordinates,
+          address: defaultLocation.address,
+          city: defaultLocation.city,
+          state: defaultLocation.state,
+          country: defaultLocation.country
+        };
+        console.log('✅ Added default location to existing user');
+      }
+      
       await user.save();
       console.log('✅ Updated existing user');
     } else {
