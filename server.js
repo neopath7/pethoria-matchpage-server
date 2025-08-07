@@ -16,6 +16,9 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 8000;
 
+// Trust proxy - CRITICAL for Koyeb deployment
+app.set('trust proxy', true);
+
 // Google OAuth client
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
