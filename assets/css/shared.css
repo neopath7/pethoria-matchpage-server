@@ -1,540 +1,629 @@
-/* PeThoria Shared JavaScript - Dark Mode, Notifications, Interactive Features */
+/* PeThoria Shared Styles - Dark Mode, Notifications, Responsive Design */
 
-class PeThoriaApp {
-  constructor() {
-    this.theme = localStorage.getItem('theme') || 'light';
-    this.notifications = [];
-    this.stats = {};
-    this.init();
+/* CSS Variables for Theme Management */
+:root {
+  /* Light theme colors */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8fafc;
+  --bg-tertiary: #f1f5f9;
+  --text-primary: #1a202c;
+  --text-secondary: #4a5568;
+  --text-tertiary: #718096;
+  --border-color: #e2e8f0;
+  --accent-primary: #667eea;
+  --accent-secondary: #764ba2;
+  --success-color: #48bb78;
+  --warning-color: #ed8936;
+  --error-color: #f56565;
+  --info-color: #4299e1;
+}
+
+[data-theme="dark"] {
+  /* Dark theme colors - cute and beautiful */
+  --bg-primary: #1a1625;
+  --bg-secondary: #2d1b3d;
+  --bg-tertiary: #3e2449;
+  --text-primary: #f7fafc;
+  --text-secondary: #e2e8f0;
+  --text-tertiary: #a0aec0;
+  --border-color: #4a3458;
+  --accent-primary: #8b5cf6;
+  --accent-secondary: #a78bfa;
+  --success-color: #68d391;
+  --warning-color: #fbb040;
+  --error-color: #fc8181;
+  --info-color: #63b3ed;
+}
+
+/* Base styles */
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Dark mode overrides for your original design */
+[data-theme="dark"] {
+  /* Background overrides */
+  --tw-gradient-from: #1a1625;
+  --tw-gradient-to: #2d1b3d;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
+}
+
+[data-theme="dark"] body {
+  background: linear-gradient(to bottom right, #1a1625, #2d1b3d, #3e2449) !important;
+}
+
+[data-theme="dark"] .bg-white {
+  background-color: var(--bg-secondary) !important;
+  border: 1px solid var(--border-color);
+}
+
+[data-theme="dark"] .bg-gray-50 {
+  background-color: var(--bg-tertiary) !important;
+}
+
+[data-theme="dark"] .bg-gradient-to-br {
+  background: linear-gradient(to bottom right, var(--bg-primary), var(--bg-secondary), var(--bg-tertiary)) !important;
+}
+
+/* Header and navigation dark mode */
+[data-theme="dark"] header {
+  background-color: rgba(26, 22, 37, 0.9) !important;
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border-color);
+}
+
+[data-theme="dark"] .text-gray-700 {
+  color: var(--text-secondary) !important;
+}
+
+[data-theme="dark"] .text-gray-600 {
+  color: var(--text-tertiary) !important;
+}
+
+[data-theme="dark"] .text-gray-900 {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .text-gray-800 {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .text-gray-500 {
+  color: var(--text-tertiary) !important;
+}
+
+/* Feature cards dark mode */
+[data-theme="dark"] .feature-card {
+  background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary)) !important;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 4px 20px rgba(139, 92, 246, 0.1);
+}
+
+[data-theme="dark"] .feature-card:hover {
+  box-shadow: 0 20px 40px rgba(139, 92, 246, 0.2);
+  transform: translateY(-10px);
+}
+
+/* Coming soon cards */
+[data-theme="dark"] .coming-soon {
+  background: linear-gradient(45deg, var(--bg-tertiary), var(--bg-secondary)) !important;
+  color: var(--text-tertiary) !important;
+  border: 2px dashed var(--border-color) !important;
+}
+
+/* Footer dark mode */
+[data-theme="dark"] .bg-gray-900 {
+  background-color: #0f0c15 !important;
+}
+
+[data-theme="dark"] .border-gray-800 {
+  border-color: var(--border-color) !important;
+}
+
+[data-theme="dark"] .text-gray-400 {
+  color: var(--text-tertiary) !important;
+}
+
+/* Gradient sections remain beautiful in dark mode */
+[data-theme="dark"] .hero-gradient {
+  background: linear-gradient(135deg, #4c1d95 0%, #581c87 100%);
+}
+
+[data-theme="dark"] .bg-gradient-to-r {
+  /* Keep original gradients for CTA sections */
+}
+
+/* Stats and counters */
+[data-theme="dark"] .stats-counter {
+  color: var(--accent-secondary) !important;
+}
+
+/* Testimonial cards in hero gradient section */
+[data-theme="dark"] .testimonial-card {
+  background: rgba(139, 92, 246, 0.15) !important;
+  backdrop-filter: blur(15px);
+  border: 1px solid rgba(167, 139, 250, 0.3);
+}
+
+/* Theme Toggle Button */
+.theme-toggle {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1000;
+  background: var(--accent-primary);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+}
+
+.theme-toggle:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="dark"] .theme-toggle {
+  background: var(--accent-secondary);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+
+/* Notification System */
+.notification-container {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  max-width: 400px;
+  width: 100%;
+  pointer-events: none;
+}
+
+.notification {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(20px);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  pointer-events: auto;
+  transform: translateY(-100px);
+  opacity: 0;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.notification.show {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.notification.hide {
+  transform: translateX(100%);
+  opacity: 0;
+}
+
+.notification-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: white;
+  flex-shrink: 0;
+}
+
+.notification-icon.success { background: var(--success-color); }
+.notification-icon.warning { background: var(--warning-color); }
+.notification-icon.error { background: var(--error-color); }
+.notification-icon.info { background: var(--info-color); }
+
+.notification-content {
+  flex: 1;
+}
+
+.notification-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+
+.notification-message {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.notification-close {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.notification-close:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+/* Dark mode notification enhancements */
+[data-theme="dark"] .notification {
+  background: rgba(45, 27, 61, 0.95);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  box-shadow: 0 8px 32px rgba(139, 92, 246, 0.1);
+}
+
+/* Quick Stats (for dashboard) */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.stat-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: all 0.3s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="dark"] .stat-card:hover {
+  box-shadow: 0 8px 25px rgba(139, 92, 246, 0.1);
+}
+
+.stat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.stat-title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.stat-icon {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  color: white;
+}
+
+.stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}
+
+.stat-change {
+  font-size: 0.75rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.stat-change.positive { color: var(--success-color); }
+.stat-change.negative { color: var(--error-color); }
+
+/* Enhanced Card Styles */
+.card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.card:hover {
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="dark"] .card:hover {
+  box-shadow: 0 8px 25px rgba(139, 92, 246, 0.1);
+}
+
+.card-header {
+  padding: 1.5rem 1.5rem 0 1.5rem;
+}
+
+.card-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+  display: flex;
+  align-items: center;
+}
+
+.card-subtitle {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.card-body {
+  padding: 1.5rem;
+}
+
+/* Button Enhancements */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-weight: 500;
+  font-size: 0.875rem;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+  color: white;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+}
+
+.btn-secondary {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-tertiary);
+}
+
+.btn-success {
+  background: var(--success-color);
+  color: white;
+}
+
+.btn-warning {
+  background: var(--warning-color);
+  color: white;
+}
+
+.btn-error {
+  background: var(--error-color);
+  color: white;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.btn.loading {
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.btn.loading::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid transparent;
+  border-top: 2px solid currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-left: 8px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
   }
-
-  init() {
-    this.initTheme();
-    this.initNotifications();
-    this.initEventListeners();
-    this.initResponsiveFeatures();
-    this.loadStats();
-    this.startPeriodicUpdates();
+  
+  .theme-toggle {
+    top: 10px;
+    right: 10px;
+    width: 45px;
+    height: 45px;
+    font-size: 1.1rem;
   }
-
-  // Theme Management
-  initTheme() {
-    document.documentElement.setAttribute('data-theme', this.theme);
-    this.createThemeToggle();
+  
+  .notification-container {
+    max-width: calc(100% - 40px);
+    left: 20px;
+    transform: none;
   }
-
-  createThemeToggle() {
-    // Check if toggle already exists
-    if (document.querySelector('.theme-toggle')) return;
-
-    const toggle = document.createElement('button');
-    toggle.className = 'theme-toggle';
-    toggle.innerHTML = `
-      <i class="icon fas fa-${this.theme === 'dark' ? 'sun' : 'moon'}"></i>
-      <span>${this.theme === 'dark' ? 'Light' : 'Dark'}</span>
-    `;
-    toggle.addEventListener('click', () => this.toggleTheme());
-    document.body.appendChild(toggle);
+  
+  .card-header {
+    padding: 1rem 1rem 0 1rem;
   }
-
-  toggleTheme() {
-    this.theme = this.theme === 'light' ? 'dark' : 'light';
-    localStorage.setItem('theme', this.theme);
-    document.documentElement.setAttribute('data-theme', this.theme);
-    
-    const toggle = document.querySelector('.theme-toggle');
-    const icon = toggle.querySelector('.icon');
-    const text = toggle.querySelector('span');
-    
-    icon.className = `icon fas fa-${this.theme === 'dark' ? 'sun' : 'moon'}`;
-    text.textContent = this.theme === 'dark' ? 'Light' : 'Dark';
-    
-    toggle.classList.add('active');
-    setTimeout(() => toggle.classList.remove('active'), 300);
-    
-    // Emit theme change event
-    window.dispatchEvent(new CustomEvent('themeChanged', { detail: { theme: this.theme } }));
-  }
-
-  // Notification System
-  initNotifications() {
-    // Create notification container if it doesn't exist
-    if (!document.querySelector('.notification-container')) {
-      const container = document.createElement('div');
-      container.className = 'notification-container';
-      container.id = 'notificationContainer';
-      document.body.appendChild(container);
-    }
-  }
-
-  showNotification(title, message, type = 'info', duration = 5000) {
-    const id = Date.now().toString();
-    const notification = {
-      id,
-      title,
-      message,
-      type,
-      timestamp: Date.now()
-    };
-
-    this.notifications.push(notification);
-    this.renderNotification(notification);
-
-    // Auto remove after duration
-    if (duration > 0) {
-      setTimeout(() => this.removeNotification(id), duration);
-    }
-
-    return id;
-  }
-
-  renderNotification(notification) {
-    const container = document.getElementById('notificationContainer');
-    const element = document.createElement('div');
-    element.className = 'notification';
-    element.setAttribute('data-id', notification.id);
-    
-    const iconMap = {
-      success: 'check',
-      warning: 'exclamation-triangle',
-      error: 'times',
-      info: 'info-circle'
-    };
-
-    element.innerHTML = `
-      <div class="notification-icon ${notification.type}">
-        <i class="fas fa-${iconMap[notification.type]}"></i>
-      </div>
-      <div class="notification-content">
-        <div class="notification-title">${notification.title}</div>
-        <div class="notification-message">${notification.message}</div>
-      </div>
-      <button class="notification-close" onclick="app.removeNotification('${notification.id}')">
-        <i class="fas fa-times"></i>
-      </button>
-    `;
-
-    container.appendChild(element);
-
-    // Add click to dismiss
-    element.addEventListener('click', (e) => {
-      if (!e.target.closest('.notification-close')) {
-        this.removeNotification(notification.id);
-      }
-    });
-  }
-
-  removeNotification(id) {
-    const element = document.querySelector(`[data-id="${id}"]`);
-    if (element) {
-      element.classList.add('removing');
-      setTimeout(() => {
-        element.remove();
-        this.notifications = this.notifications.filter(n => n.id !== id);
-      }, 300);
-    }
-  }
-
-  // Quick Stats System
-  loadStats() {
-    // Simulate loading stats from API
-    this.updateStats({
-      totalUsers: { value: 2847, trend: 'up', change: '+12%' },
-      activeMatches: { value: 156, trend: 'up', change: '+8%' },
-      messagesExchanged: { value: 8934, trend: 'up', change: '+23%' },
-      successfulMatches: { value: 234, trend: 'up', change: '+15%' },
-      totalRevenue: { value: '$12,450', trend: 'up', change: '+18%' },
-      avgResponseTime: { value: '2.3min', trend: 'down', change: '-5%' }
-    });
-  }
-
-  updateStats(newStats) {
-    this.stats = { ...this.stats, ...newStats };
-    this.renderStats();
-  }
-
-  renderStats() {
-    const container = document.getElementById('quickStatsContainer');
-    if (!container) return;
-
-    const statsHTML = Object.entries(this.stats).map(([key, stat]) => {
-      const iconMap = {
-        totalUsers: 'users',
-        activeMatches: 'heart',
-        messagesExchanged: 'comments',
-        successfulMatches: 'handshake',
-        totalRevenue: 'dollar-sign',
-        avgResponseTime: 'clock'
-      };
-
-      const labelMap = {
-        totalUsers: 'Total Users',
-        activeMatches: 'Active Matches',
-        messagesExchanged: 'Messages Today',
-        successfulMatches: 'Successful Matches',
-        totalRevenue: 'Revenue This Month',
-        avgResponseTime: 'Avg Response Time'
-      };
-
-      return `
-        <div class="stat-card fade-in">
-          <div class="stat-header">
-            <div class="stat-icon">
-              <i class="fas fa-${iconMap[key]}"></i>
-            </div>
-            <div class="stat-trend ${stat.trend}">
-              <i class="fas fa-arrow-${stat.trend === 'up' ? 'up' : 'down'}"></i>
-              ${stat.change}
-            </div>
-          </div>
-          <div class="stat-value">${stat.value}</div>
-          <div class="stat-label">${labelMap[key]}</div>
-          <div class="stat-description">Last 30 days comparison</div>
-        </div>
-      `;
-    }).join('');
-
-    container.innerHTML = statsHTML;
-  }
-
-  // Real-time Updates
-  startPeriodicUpdates() {
-    // Update stats every 30 seconds
-    setInterval(() => {
-      this.loadStats();
-      this.checkForNotifications();
-    }, 30000);
-
-    // Simulate random notifications for demo
-    this.startDemoNotifications();
-  }
-
-  startDemoNotifications() {
-    const demoNotifications = [
-      { title: 'New Match!', message: 'You have a new pet match with Luna the Golden Retriever', type: 'success' },
-      { title: 'Message Received', message: 'Sarah sent you a message about the playdate', type: 'info' },
-      { title: 'Match Request', message: 'Max the Labrador wants to be friends!', type: 'info' },
-      { title: 'System Update', message: 'New features are now available in your dashboard', type: 'warning' },
-      { title: 'Reward Earned', message: 'You earned 50 points for being active!', type: 'success' }
-    ];
-
-    let notificationIndex = 0;
-    setInterval(() => {
-      if (Math.random() > 0.7) { // 30% chance every interval
-        const notification = demoNotifications[notificationIndex % demoNotifications.length];
-        this.showNotification(notification.title, notification.message, notification.type);
-        notificationIndex++;
-      }
-    }, 15000); // Every 15 seconds
-  }
-
-  checkForNotifications() {
-    // In a real app, this would check for new notifications from the server
-    // For now, we'll simulate this
-    if (window.location.pathname.includes('dashboard.html')) {
-      // Simulate checking for new orders, messages, etc.
-      this.simulateRealtimeUpdates();
-    }
-  }
-
-  simulateRealtimeUpdates() {
-    // Simulate real-time stat updates
-    const randomUpdate = Math.random();
-    if (randomUpdate > 0.8) {
-      const currentUsers = parseInt(this.stats.totalUsers?.value) || 2847;
-      this.updateStats({
-        totalUsers: { 
-          value: currentUsers + Math.floor(Math.random() * 10), 
-          trend: 'up', 
-          change: `+${Math.floor(Math.random() * 5) + 1}%` 
-        }
-      });
-    }
-  }
-
-  // Responsive Features
-  initResponsiveFeatures() {
-    this.handleMobileNavigation();
-    this.initTouchGestures();
-    this.optimizeForMobile();
-  }
-
-  handleMobileNavigation() {
-    // Add mobile menu toggle for responsive navigation
-    const nav = document.querySelector('nav, header');
-    if (nav && window.innerWidth <= 768) {
-      this.createMobileMenu(nav);
-    }
-  }
-
-  createMobileMenu(nav) {
-    const existingToggle = nav.querySelector('.mobile-menu-toggle');
-    if (existingToggle) return;
-
-    const toggle = document.createElement('button');
-    toggle.className = 'mobile-menu-toggle';
-    toggle.innerHTML = '<i class="fas fa-bars"></i>';
-    toggle.style.cssText = `
-      display: none;
-      background: none;
-      border: none;
-      font-size: 1.5rem;
-      color: var(--text-primary);
-      cursor: pointer;
-      padding: 8px;
-    `;
-
-    // Show toggle on mobile
-    if (window.innerWidth <= 768) {
-      toggle.style.display = 'block';
-    }
-
-    toggle.addEventListener('click', () => {
-      nav.classList.toggle('mobile-menu-open');
-    });
-
-    nav.appendChild(toggle);
-  }
-
-  initTouchGestures() {
-    // Add swipe gestures for mobile
-    let startX, startY, endX, endY;
-
-    document.addEventListener('touchstart', (e) => {
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-    });
-
-    document.addEventListener('touchend', (e) => {
-      endX = e.changedTouches[0].clientX;
-      endY = e.changedTouches[0].clientY;
-      this.handleSwipe(startX, startY, endX, endY);
-    });
-  }
-
-  handleSwipe(startX, startY, endX, endY) {
-    const deltaX = endX - startX;
-    const deltaY = endY - startY;
-    const minSwipeDistance = 50;
-
-    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {
-      if (deltaX > 0) {
-        // Swipe right
-        this.handleSwipeRight();
-      } else {
-        // Swipe left
-        this.handleSwipeLeft();
-      }
-    }
-  }
-
-  handleSwipeRight() {
-    // Handle swipe right gesture
-    window.dispatchEvent(new CustomEvent('swipeRight'));
-  }
-
-  handleSwipeLeft() {
-    // Handle swipe left gesture
-    window.dispatchEvent(new CustomEvent('swipeLeft'));
-  }
-
-  optimizeForMobile() {
-    // Optimize images for mobile
-    this.lazyLoadImages();
-    
-    // Optimize animations for low-power devices
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      document.body.classList.add('reduced-motion');
-    }
-  }
-
-  lazyLoadImages() {
-    const images = document.querySelectorAll('img[data-src]');
-    const imageObserver = new IntersectionObserver((entries, observer) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          const img = entry.target;
-          img.src = img.dataset.src;
-          img.removeAttribute('data-src');
-          observer.unobserve(img);
-        }
-      });
-    });
-
-    images.forEach(img => imageObserver.observe(img));
-  }
-
-  // Event Listeners
-  initEventListeners() {
-    // Window resize handler
-    let resizeTimeout;
-    window.addEventListener('resize', () => {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(() => {
-        this.handleResize();
-      }, 250);
-    });
-
-    // Keyboard shortcuts
-    document.addEventListener('keydown', (e) => {
-      this.handleKeyboardShortcuts(e);
-    });
-
-    // Page visibility change
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        this.pauseUpdates();
-      } else {
-        this.resumeUpdates();
-      }
-    });
-
-    // Custom events
-    window.addEventListener('themeChanged', (e) => {
-      this.onThemeChanged(e.detail.theme);
-    });
-  }
-
-  handleResize() {
-    // Update mobile menu visibility
-    const mobileToggle = document.querySelector('.mobile-menu-toggle');
-    if (mobileToggle) {
-      mobileToggle.style.display = window.innerWidth <= 768 ? 'block' : 'none';
-    }
-
-    // Adjust notification container
-    const notificationContainer = document.querySelector('.notification-container');
-    if (notificationContainer && window.innerWidth <= 768) {
-      notificationContainer.style.left = '10px';
-      notificationContainer.style.right = '10px';
-      notificationContainer.style.maxWidth = 'none';
-    }
-  }
-
-  handleKeyboardShortcuts(e) {
-    // Theme toggle with Ctrl/Cmd + D
-    if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
-      e.preventDefault();
-      this.toggleTheme();
-    }
-
-    // Clear notifications with Escape
-    if (e.key === 'Escape') {
-      this.clearAllNotifications();
-    }
-  }
-
-  clearAllNotifications() {
-    const notifications = document.querySelectorAll('.notification');
-    notifications.forEach(notification => {
-      const id = notification.getAttribute('data-id');
-      this.removeNotification(id);
-    });
-  }
-
-  pauseUpdates() {
-    this.updatesPaused = true;
-  }
-
-  resumeUpdates() {
-    this.updatesPaused = false;
-    this.checkForNotifications();
-  }
-
-  onThemeChanged(theme) {
-    // Handle theme change effects
-    if (theme === 'dark') {
-      this.showNotification('Dark Mode', 'Switched to dark theme', 'info', 2000);
-    } else {
-      this.showNotification('Light Mode', 'Switched to light theme', 'info', 2000);
-    }
-  }
-
-  // Utility Methods
-  formatNumber(num) {
-    if (num >= 1000000) {
-      return (num / 1000000).toFixed(1) + 'M';
-    } else if (num >= 1000) {
-      return (num / 1000).toFixed(1) + 'K';
-    }
-    return num.toString();
-  }
-
-  formatCurrency(amount) {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(amount);
-  }
-
-  formatTime(timestamp) {
-    return new Intl.DateTimeFormat('en-US', {
-      hour: '2-digit',
-      minute: '2-digit'
-    }).format(new Date(timestamp));
-  }
-
-  // Animation Utilities
-  animateNumber(element, start, end, duration = 1000) {
-    const range = end - start;
-    const increment = range / (duration / 16);
-    let current = start;
-
-    const timer = setInterval(() => {
-      current += increment;
-      if ((increment > 0 && current >= end) || (increment < 0 && current <= end)) {
-        current = end;
-        clearInterval(timer);
-      }
-      element.textContent = Math.floor(current);
-    }, 16);
-  }
-
-  // API Helpers
-  async fetchWithAuth(url, options = {}) {
-    const token = localStorage.getItem('token');
-    const defaultOptions = {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { 'Authorization': `Bearer ${token}` })
-      }
-    };
-
-    return fetch(url, { ...defaultOptions, ...options });
-  }
-
-  // Performance Monitoring
-  initPerformanceMonitoring() {
-    // Monitor page load performance
-    window.addEventListener('load', () => {
-      const perfData = performance.getEntriesByType('navigation')[0];
-      console.log('Page Load Time:', perfData.loadEventEnd - perfData.loadEventStart);
-    });
+  
+  .card-body {
+    padding: 1rem;
   }
 }
 
-// Initialize the app
-const app = new PeThoriaApp();
-
-// Make app globally available
-window.PeThoriaApp = app;
-
-// Export for module usage
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = PeThoriaApp;
+/* Activity Indicators */
+.activity-indicator {
+  position: relative;
 }
 
-// Add some utility functions to global scope
-window.showNotification = (title, message, type, duration) => 
-  app.showNotification(title, message, type, duration);
+.activity-indicator::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  background: var(--success-color);
+  border-radius: 50%;
+  border: 2px solid var(--bg-primary);
+}
 
-window.toggleTheme = () => app.toggleTheme();
+/* Progress Bars */
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+}
 
-// Service Worker Registration (for PWA features)
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then(registration => console.log('SW registered'))
-      .catch(registrationError => console.log('SW registration failed'));
-  });
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+/* Tooltips */
+.tooltip {
+  position: relative;
+  cursor: help;
+}
+
+.tooltip::before {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  z-index: 1000;
+}
+
+.tooltip:hover::before {
+  opacity: 1;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes bounceIn {
+  0% { opacity: 0; transform: scale(0.3); }
+  50% { opacity: 1; transform: scale(1.05); }
+  70% { transform: scale(0.9); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.fade-in { animation: fadeIn 0.6s ease-out; }
+.slide-in { animation: slideIn 0.6s ease-out; }
+.bounce-in { animation: bounceIn 0.8s ease-out; }
+
+/* Dark mode specific cute enhancements */
+[data-theme="dark"] {
+  /* Make scrollbars pretty in dark mode */
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-secondary) var(--bg-secondary);
+}
+
+[data-theme="dark"] *::-webkit-scrollbar {
+  width: 8px;
+}
+
+[data-theme="dark"] *::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+[data-theme="dark"] *::-webkit-scrollbar-thumb {
+  background: var(--accent-secondary);
+  border-radius: 4px;
+}
+
+[data-theme="dark"] *::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-primary);
+}
+
+/* Selection colors in dark mode */
+[data-theme="dark"] *::selection {
+  background: var(--accent-secondary);
+  color: var(--bg-primary);
+}
+
+/* Focus indicators */
+[data-theme="dark"] *:focus {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
+}
+
+/* Input and form elements */
+[data-theme="dark"] input,
+[data-theme="dark"] textarea,
+[data-theme="dark"] select {
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] input:focus,
+[data-theme="dark"] textarea:focus,
+[data-theme="dark"] select:focus {
+  border-color: var(--accent-secondary) !important;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1) !important;
 } 
