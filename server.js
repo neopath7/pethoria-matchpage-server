@@ -127,6 +127,11 @@ const userSchema = new mongoose.Schema({
   points: { type: Number, default: 0 },
   badges: [String],
   
+  // User statistics for dashboard
+  totalMatches: { type: Number, default: 0 },
+  messagesCount: { type: Number, default: 0 },
+  profileViews: { type: Number, default: 0 },
+  
   // Matching data
   swipedProfiles: [{
     profileId: mongoose.Schema.Types.ObjectId,
@@ -204,90 +209,78 @@ const generateToken = (userId, email) => {
   );
 };
 
+// Helper functions to update user statistics
+const updateUserStats = async (userId, statType, increment = 1) => {
+  try {
+    const updateField = {};
+    updateField[statType] = increment;
+    
+    await User.findByIdAndUpdate(
+      userId,
+      { $inc: updateField },
+      { new: true }
+    );
+  } catch (error) {
+    console.error(`Error updating ${statType} for user ${userId}:`, error);
+  }
+};
+
+const incrementTotalMatches = async (userId) => {
+  await updateUserStats(userId, 'totalMatches', 1);
+};
+
+const incrementMessageCount = async (userId) => {
+  await updateUserStats(userId, 'messagesCount', 1);
+};
+
+const incrementProfileViews = async (userId) => {
+  await updateUserStats(userId, 'profileViews', 1);
+};
+
 // ==================== AUTHENTICATION ROUTES ====================
 
 // Google OAuth authentication
 app.post('/api/auth/google', async (req, res) => {
   try {
-    console.log('🔍 Google OAuth request received');
-    console.log('📦 Request body:', req.body);
-    
     const { credential } = req.body;
     
     if (!credential) {
-      console.error('❌ No credential provided in request');
       return res.status(400).json({ 
         success: false, 
         message: 'Google credential is required' 
       });
     }
 
-    console.log('🔑 Google credential received, length:', credential.length);
-    console.log('🔧 Google Client ID:', process.env.GOOGLE_CLIENT_ID ? 'Set' : 'NOT SET');
-    
     // Verify the Google token
-    console.log('🔄 Attempting to verify Google token...');
     const ticket = await googleClient.verifyIdToken({
       idToken: credential,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
     
-    console.log('✅ Google token verified successfully');
     const payload = ticket.getPayload();
-    console.log('📋 Token payload:', {
-      sub: payload.sub,
-      email: payload.email,
-      name: payload.name,
-      picture: payload.picture ? 'Present' : 'Not present'
-    });
-    
     const { sub: googleId, email, name, picture } = payload;
 
     if (!email || !name) {
-      console.error('❌ Invalid Google account data - missing email or name');
       return res.status(400).json({ 
         success: false, 
         message: 'Invalid Google account data' 
       });
     }
 
-    console.log('🔍 Searching for existing user with email:', email);
-    
     // Check if user already exists
     let user = await User.findOne({ 
       $or: [{ email }, { googleId }] 
     });
 
     if (user) {
-      console.log('👤 Found existing user:', user._id);
-      console.log('📍 Existing user location:', user.location);
-      
       // Update existing user
       user.googleId = googleId;
       user.lastActive = new Date();
       if (picture && !user.profilePicture) {
         user.profilePicture = picture;
       }
-      
-      // CRITICAL FIX: Ensure user has valid location coordinates
-      if (!user.location || !user.location.coordinates || user.location.coordinates.length !== 2) {
-        console.log('🔧 User missing valid coordinates, adding default location...');
-        const defaultLocation = await getLocationFromIP('8.8.8.8');
-        user.location = {
-          type: 'Point',
-          coordinates: defaultLocation.coordinates,
-          address: defaultLocation.address,
-          city: defaultLocation.city,
-          state: defaultLocation.state,
-          country: defaultLocation.country
-        };
-        console.log('✅ Added default location to existing user');
-      }
-      
       await user.save();
-      console.log('✅ Updated existing user');
     } else {
-      console.log('👤 Creating new user...');
       // Create new user with default location
       const defaultLocation = await getLocationFromIP('8.8.8.8'); // Default to fallback location
       
@@ -309,17 +302,12 @@ app.post('/api/auth/google', async (req, res) => {
       });
       
       await user.save();
-      console.log('✅ Created new user:', user._id);
     }
 
-    console.log('🔐 Generating JWT token...');
-    console.log('🔧 JWT Secret:', process.env.JWT_SECRET ? 'Set' : 'NOT SET');
-    
     // Generate JWT token
     const token = generateToken(user._id, user.email);
-    console.log('✅ JWT token generated, length:', token.length);
 
-    const responseData = {
+    res.json({
       success: true,
       message: 'Authentication successful',
       token,
@@ -331,32 +319,10 @@ app.post('/api/auth/google', async (req, res) => {
         isSubscribed: user.isSubscribed,
         points: user.points
       }
-    };
-    
-    console.log('📤 Sending success response:', {
-      success: responseData.success,
-      message: responseData.message,
-      userEmail: responseData.user.email,
-      userName: responseData.user.name
     });
-
-    res.json(responseData);
 
   } catch (error) {
-    console.error('💥 Google OAuth error details:', {
-      name: error.name,
-      message: error.message,
-      stack: error.stack
-    });
-    
-    if (error.message && error.message.includes('Token used too early')) {
-      console.error('⏰ Token timing issue - this is a Google OAuth timing problem');
-    } else if (error.message && error.message.includes('Wrong audience')) {
-      console.error('🎯 Wrong audience - check GOOGLE_CLIENT_ID configuration');
-    } else if (error.message && error.message.includes('Invalid token signature')) {
-      console.error('🔏 Invalid token signature - token may be corrupted');
-    }
-    
+    console.error('Google OAuth error:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Authentication failed' 
@@ -415,6 +381,46 @@ app.get('/api/profile/me', authenticateToken, async (req, res) => {
     res.status(500).json({ 
       success: false, 
       message: 'Failed to get profile' 
+    });
+  }
+});
+
+// Get user statistics for dashboard
+app.get('/api/profile/stats', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    // Calculate user statistics
+    const stats = {
+      points: user.points || 0,
+      totalMatches: user.totalMatches || 0,
+      messagesCount: user.messagesCount || 0,
+      profileViews: user.profileViews || 0,
+      memberSince: user.createdAt ? new Date(user.createdAt).getFullYear() : new Date().getFullYear(),
+      verificationStatus: user.idVerificationStatus || 'not_submitted',
+      badges: user.badges?.length || 0,
+      petCount: user.pets?.length || 0,
+      lastActive: user.lastActive,
+      joinDate: user.createdAt
+    };
+
+    res.json({
+      success: true,
+      stats: stats
+    });
+
+  } catch (error) {
+    console.error('Get user stats error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get user statistics' 
     });
   }
 });
