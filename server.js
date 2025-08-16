@@ -131,6 +131,20 @@ const userSchema = new mongoose.Schema({
   totalMatches: { type: Number, default: 0 },
   messagesCount: { type: Number, default: 0 },
   profileViews: { type: Number, default: 0 },
+
+  // User activity tracking
+  recentActivity: [{
+    type: { 
+      type: String, 
+      enum: ['match', 'message', 'points_earned', 'profile_updated', 'verification_completed', 'login', 'pet_added', 'swipe_like', 'swipe_pass'],
+      required: true 
+    },
+    description: { type: String, required: true },
+    relatedUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    relatedUserName: String,
+    pointsEarned: Number,
+    timestamp: { type: Date, default: Date.now }
+  }],
   
   // Matching data
   swipedProfiles: [{
@@ -237,6 +251,37 @@ const incrementProfileViews = async (userId) => {
   await updateUserStats(userId, 'profileViews', 1);
 };
 
+// Helper function to add user activity
+const addUserActivity = async (userId, type, description, options = {}) => {
+  try {
+    const activityData = {
+      type,
+      description,
+      timestamp: new Date()
+    };
+
+    // Add optional fields
+    if (options.relatedUserId) activityData.relatedUserId = options.relatedUserId;
+    if (options.relatedUserName) activityData.relatedUserName = options.relatedUserName;
+    if (options.pointsEarned) activityData.pointsEarned = options.pointsEarned;
+
+    await User.findByIdAndUpdate(
+      userId,
+      { 
+        $push: { 
+          recentActivity: {
+            $each: [activityData],
+            $slice: -20 // Keep only the last 20 activities
+          }
+        }
+      },
+      { new: true }
+    );
+  } catch (error) {
+    console.error(`Error adding user activity for user ${userId}:`, error);
+  }
+};
+
 // ==================== AUTHENTICATION ROUTES ====================
 
 // Google OAuth authentication
@@ -280,6 +325,9 @@ app.post('/api/auth/google', async (req, res) => {
         user.profilePicture = picture;
       }
       await user.save();
+      
+      // Add login activity
+      await addUserActivity(user._id, 'login', 'Signed in to PeThoria');
     } else {
       // Create new user with default location
       const defaultLocation = await getLocationFromIP('8.8.8.8'); // Default to fallback location
@@ -302,6 +350,10 @@ app.post('/api/auth/google', async (req, res) => {
       });
       
       await user.save();
+      
+      // Add welcome activities for new users
+      await addUserActivity(user._id, 'points_earned', 'Welcome bonus points earned!', { pointsEarned: 50 });
+      await addUserActivity(user._id, 'profile_updated', 'Profile created successfully');
     }
 
     // Generate JWT token
@@ -425,6 +477,65 @@ app.get('/api/profile/stats', authenticateToken, async (req, res) => {
   }
 });
 
+// Get user's recent activity
+app.get('/api/profile/activity', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId)
+      .select('recentActivity')
+      .populate('recentActivity.relatedUserId', 'name profilePicture');
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    // Sort activities by timestamp (newest first) and limit to 10
+    const activities = (user.recentActivity || [])
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .slice(0, 10)
+      .map(activity => ({
+        type: activity.type,
+        description: activity.description,
+        relatedUserName: activity.relatedUserName,
+        pointsEarned: activity.pointsEarned,
+        timestamp: activity.timestamp,
+        timeAgo: getTimeAgo(activity.timestamp)
+      }));
+
+    res.json({
+      success: true,
+      activities: activities
+    });
+
+  } catch (error) {
+    console.error('Get user activity error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get user activity' 
+    });
+  }
+});
+
+// Helper function to format time ago
+function getTimeAgo(timestamp) {
+  const now = new Date();
+  const activityTime = new Date(timestamp);
+  const diffInMinutes = Math.floor((now - activityTime) / (1000 * 60));
+  
+  if (diffInMinutes < 1) return 'Just now';
+  if (diffInMinutes < 60) return `${diffInMinutes} minute${diffInMinutes !== 1 ? 's' : ''} ago`;
+  
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) return `${diffInHours} hour${diffInHours !== 1 ? 's' : ''} ago`;
+  
+  const diffInDays = Math.floor(diffInHours / 24);
+  if (diffInDays < 7) return `${diffInDays} day${diffInDays !== 1 ? 's' : ''} ago`;
+  
+  return activityTime.toLocaleDateString();
+}
+
 // Update user profile
 app.put('/api/profile/update', authenticateToken, upload.single('profilePicture'), async (req, res) => {
   try {
@@ -474,6 +585,9 @@ app.put('/api/profile/update', authenticateToken, upload.single('profilePicture'
         message: 'User not found' 
       });
     }
+
+    // Add profile update activity
+    await addUserActivity(userId, 'profile_updated', 'Profile information updated');
 
     res.json({
       success: true,
@@ -578,6 +692,9 @@ app.post('/api/profile/submit-id-verification', authenticateToken, upload.array(
         message: 'User not found' 
       });
     }
+
+    // Add ID verification activity
+    await addUserActivity(req.user.userId, 'verification_completed', 'ID verification documents submitted');
 
     res.json({
       success: true,
@@ -758,6 +875,13 @@ app.post('/api/matches/swipe', authenticateToken, async (req, res) => {
       timestamp: new Date()
     });
     
+    // Track swipe activity
+    if (action === 'like') {
+      await addUserActivity(currentUser._id, 'swipe_like', 'Liked a profile');
+    } else if (action === 'pass') {
+      await addUserActivity(currentUser._id, 'swipe_pass', 'Passed on a profile');
+    }
+    
     let isMatch = false;
     
     // Check for match if it's a like or superlike
@@ -785,6 +909,20 @@ app.post('/api/matches/swipe', authenticateToken, async (req, res) => {
           targetUser.matches.push({
             matchedUserId: currentUser._id,
             timestamp: new Date()
+          });
+          
+          // Update match statistics for both users
+          await incrementTotalMatches(currentUser._id);
+          await incrementTotalMatches(targetUserId);
+          
+          // Add match activities for both users
+          await addUserActivity(currentUser._id, 'match', `New match with ${targetUser.name}`, { 
+            relatedUserId: targetUserId, 
+            relatedUserName: targetUser.name 
+          });
+          await addUserActivity(targetUserId, 'match', `New match with ${currentUser.name}`, { 
+            relatedUserId: currentUser._id, 
+            relatedUserName: currentUser.name 
           });
           
           await targetUser.save();
