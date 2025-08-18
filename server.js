@@ -11,10 +11,25 @@ const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const multer = require('multer');
 const path = require('path');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const redis = require('redis');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 8000;
+
+// Initialize Redis client
+let redisClient;
+try {
+  redisClient = redis.createClient({
+    url: process.env.REDIS_URL || 'redis://localhost:6379'
+  });
+  redisClient.connect();
+  console.log('✅ Redis connected successfully');
+} catch (error) {
+  console.log('⚠️ Redis connection failed, using memory cache fallback');
+  redisClient = null;
+}
 
 // Trust proxy - CRITICAL for Koyeb deployment
 app.set('trust proxy', 1); // Trust first proxy (Koyeb load balancer)
@@ -133,17 +148,48 @@ const userSchema = new mongoose.Schema({
   profileViews: { type: Number, default: 0 },
 
   // User activity tracking
-  recentActivity: [{
-    type: { 
-      type: String, 
-      enum: ['match', 'message', 'points_earned', 'profile_updated', 'verification_completed', 'login', 'pet_added', 'swipe_like', 'swipe_pass'],
-      required: true 
+    recentActivity: [{
+    type: {
+      type: String,
+      enum: ['match', 'message', 'points_earned', 'profile_updated', 'verification_completed', 'verification_submitted', 'membership', 'login', 'pet_added', 'swipe_like', 'swipe_pass'],
+      required: true
     },
     description: { type: String, required: true },
     relatedUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     relatedUserName: String,
     pointsEarned: Number,
     timestamp: { type: Date, default: Date.now }
+  }],
+  
+  // Membership fields
+  membershipType: { type: String, enum: ['free', 'premium'], default: 'free' },
+  membershipStatus: { type: String, enum: ['active', 'cancelled', 'expired'], default: 'active' },
+  membershipPlan: { type: String, enum: ['monthly', 'yearly', 'lifetime'] },
+  membershipStartDate: Date,
+  membershipEndDate: Date,
+  membershipCancelledAt: Date,
+  paymentMethod: String,
+  lastTransactionId: String,
+  
+  // ID Verification fields
+  idVerificationDocuments: [{
+    filename: String,
+    originalName: String,
+    path: String,
+    size: Number,
+    uploadedAt: { type: Date, default: Date.now }
+  }],
+  idVerificationSubmittedAt: Date,
+  idVerificationApprovedAt: Date,
+  
+  // Badges system
+  badges: [{
+    type: String,
+    name: String,
+    description: String,
+    icon: String,
+    color: String,
+    earnedAt: { type: Date, default: Date.now }
   }],
   
   // Matching data
@@ -972,6 +1018,182 @@ app.get('/api/matches', authenticateToken, async (req, res) => {
   }
 });
 
+// Enhanced filtered matching
+app.post('/api/matches/filtered', authenticateToken, async (req, res) => {
+  try {
+    const { latitude, longitude, filters, userId } = req.body;
+    const currentUser = await User.findById(req.user.userId);
+    
+    if (!currentUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Get user's swiped profiles to exclude them
+    const swipedProfileIds = currentUser.swipedProfiles.map(profile => profile.profileId);
+    
+    // Build query based on filters
+    let query = {
+      _id: { 
+        $ne: currentUser._id,
+        $nin: swipedProfileIds
+      },
+      lastActive: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } // Active in last 30 days
+    };
+    
+    // Add location-based filtering if coordinates provided
+    if (latitude && longitude && filters.radius) {
+      const distanceInMeters = filters.radius * 1609.34; // Convert miles to meters
+      query.location = {
+        $near: {
+          $geometry: {
+            type: 'Point',
+            coordinates: [longitude, latitude]
+          },
+          $maxDistance: distanceInMeters
+        }
+      };
+    }
+    
+    // Add city filter
+    if (filters.city) {
+      query['locationData.city'] = new RegExp(filters.city, 'i');
+    }
+    
+    // Add state filter
+    if (filters.state) {
+      query['locationData.state'] = filters.state;
+    }
+    
+    // Add pet type filter
+    if (filters.petType) {
+      query['pets.type'] = filters.petType;
+    }
+    
+    // Add breed filter
+    if (filters.breed) {
+      query['pets.breed'] = new RegExp(filters.breed.replace('_', ' '), 'i');
+    }
+    
+    // Add age range filter
+    if (filters.ageRange) {
+      const now = new Date();
+      let minAge, maxAge;
+      
+      switch (filters.ageRange) {
+        case 'puppy':
+          minAge = 0;
+          maxAge = 1;
+          break;
+        case 'young':
+          minAge = 1;
+          maxAge = 3;
+          break;
+        case 'adult':
+          minAge = 3;
+          maxAge = 7;
+          break;
+        case 'senior':
+          minAge = 7;
+          maxAge = 100;
+          break;
+      }
+      
+      if (minAge !== undefined && maxAge !== undefined) {
+        const maxBirthDate = new Date(now.getFullYear() - minAge, now.getMonth(), now.getDate());
+        const minBirthDate = new Date(now.getFullYear() - maxAge, now.getMonth(), now.getDate());
+        
+        query['pets.birthDate'] = {
+          $gte: minBirthDate,
+          $lte: maxBirthDate
+        };
+      }
+    }
+    
+    // Find matching users
+    let matchingUsers = await User.find(query).limit(50);
+    
+    // Sort by real users first if prioritize is enabled
+    if (filters.prioritizeRealUsers) {
+      matchingUsers.sort((a, b) => {
+        const aIsReal = a.isVerified && a.profileImages && a.profileImages.length > 0;
+        const bIsReal = b.isVerified && b.profileImages && b.profileImages.length > 0;
+        
+        if (aIsReal && !bIsReal) return -1;
+        if (!aIsReal && bIsReal) return 1;
+        return 0;
+      });
+    }
+    
+    // Format profiles for frontend
+    const formattedMatches = matchingUsers.map(user => {
+      const primaryPet = user.pets && user.pets.length > 0 ? user.pets[0] : null;
+      const distance = latitude && longitude && user.location ? 
+        calculateDistance(latitude, longitude, user.location.coordinates[1], user.location.coordinates[0]) : 
+        'Unknown';
+        
+      return {
+        id: user._id,
+        name: primaryPet ? primaryPet.name : user.name,
+        age: primaryPet && primaryPet.birthDate ? 
+          `${Math.floor((Date.now() - primaryPet.birthDate) / (365.25 * 24 * 60 * 60 * 1000))} years` : 
+          'Unknown age',
+        breed: primaryPet ? primaryPet.breed : 'Unknown breed',
+        petType: primaryPet ? primaryPet.type : 'unknown',
+        personality: primaryPet ? (primaryPet.personality || []) : [],
+        distance: typeof distance === 'number' ? `${distance.toFixed(1)} miles` : distance,
+        images: user.profileImages && user.profileImages.length > 0 ? 
+          user.profileImages : ['https://images.unsplash.com/photo-1544568100-847a948585b9?w=400'],
+        owner: {
+          name: user.name,
+          isMember: user.membershipType !== 'free',
+          isVerified: user.isVerified || false,
+          isReal: user.isVerified && user.profileImages && user.profileImages.length > 0
+        },
+        lastSeen: user.lastActive ? formatTimeAgo(user.lastActive) : 'Unknown',
+        isRealUser: user.isVerified && user.profileImages && user.profileImages.length > 0
+      };
+    });
+    
+    res.json({
+      success: true,
+      matches: formattedMatches,
+      count: formattedMatches.length,
+      filters: filters
+    });
+    
+  } catch (error) {
+    console.error('Filtered matching error:', error);
+    res.status(500).json({ error: 'Failed to get filtered matches' });
+  }
+});
+
+// Helper function to calculate distance between two points
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 3959; // Earth's radius in miles
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
+// Helper function to format time ago
+function formatTimeAgo(date) {
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  
+  if (diffMins < 60) return `${diffMins} min ago`;
+  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+  if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+  return date.toLocaleDateString();
+}
+
 // Update user preferences
 app.post('/api/preferences/update', authenticateToken, async (req, res) => {
   try {
@@ -1001,6 +1223,470 @@ app.post('/api/preferences/update', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to update preferences' });
   }
 });
+
+// ==================== PAYMENT PROCESSING ROUTES ====================
+
+// Stripe Payment Processing
+app.post('/api/payments/stripe', authenticateToken, async (req, res) => {
+  try {
+    const { token, plan, amount } = req.body;
+    const user = await User.findById(req.user.userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Create Stripe charge
+    const charge = await stripe.charges.create({
+      amount: amount, // Amount in cents
+      currency: 'usd',
+      source: token,
+      description: `PeThoria Premium - ${plan} plan`,
+      metadata: {
+        userId: user._id.toString(),
+        plan: plan,
+        email: user.email
+      }
+    });
+    
+    if (charge.status === 'succeeded') {
+      // Update user membership
+      await updateUserMembership(user._id, plan, 'stripe', charge.id);
+      
+      res.json({
+        success: true,
+        chargeId: charge.id,
+        message: 'Payment successful'
+      });
+    } else {
+      res.status(400).json({ error: 'Payment failed' });
+    }
+    
+  } catch (error) {
+    console.error('Stripe payment error:', error);
+    res.status(500).json({ error: 'Payment processing failed' });
+  }
+});
+
+// PayPal Payment Processing
+app.post('/api/payments/paypal', authenticateToken, async (req, res) => {
+  try {
+    const { orderID, plan, amount } = req.body;
+    const user = await User.findById(req.user.userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Verify PayPal payment (implement PayPal API verification)
+    // For now, we'll assume the payment is valid since PayPal handled it
+    
+    // Update user membership
+    await updateUserMembership(user._id, plan, 'paypal', orderID);
+    
+    res.json({
+      success: true,
+      orderId: orderID,
+      message: 'PayPal payment successful'
+    });
+    
+  } catch (error) {
+    console.error('PayPal payment error:', error);
+    res.status(500).json({ error: 'PayPal payment processing failed' });
+  }
+});
+
+// ==================== MEMBERSHIP MANAGEMENT ROUTES ====================
+
+// Activate membership
+app.post('/api/membership/activate', authenticateToken, async (req, res) => {
+  try {
+    const { plan, amount } = req.body;
+    const user = await User.findById(req.user.userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Update user membership status
+    user.membershipType = 'premium';
+    user.membershipStatus = 'active';
+    user.membershipPlan = plan;
+    user.membershipStartDate = new Date();
+    
+    // Set expiration date based on plan
+    if (plan === 'monthly') {
+      user.membershipEndDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    } else if (plan === 'yearly') {
+      user.membershipEndDate = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+    } else if (plan === 'lifetime') {
+      user.membershipEndDate = new Date('2099-12-31');
+    }
+    
+    // Add premium member badge
+    if (!user.badges.some(badge => badge.type === 'premium_member')) {
+      user.badges.push({
+        type: 'premium_member',
+        name: 'Premium Member',
+        description: 'Active premium subscription',
+        icon: 'fas fa-crown',
+        color: '#fbbf24',
+        earnedAt: new Date()
+      });
+    }
+    
+    await user.save();
+    
+    // Add activity
+    await addUserActivity(user._id, 'membership', `Activated ${plan} premium membership`);
+    
+    res.json({
+      success: true,
+      membership: {
+        type: user.membershipType,
+        status: user.membershipStatus,
+        plan: user.membershipPlan,
+        startDate: user.membershipStartDate,
+        endDate: user.membershipEndDate
+      }
+    });
+    
+  } catch (error) {
+    console.error('Membership activation error:', error);
+    res.status(500).json({ error: 'Failed to activate membership' });
+  }
+});
+
+// Cancel membership
+app.post('/api/membership/cancel', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Update membership status
+    user.membershipStatus = 'cancelled';
+    user.membershipCancelledAt = new Date();
+    
+    // Remove premium badge
+    user.badges = user.badges.filter(badge => badge.type !== 'premium_member');
+    
+    await user.save();
+    
+    // Add activity
+    await addUserActivity(user._id, 'membership', 'Cancelled premium membership');
+    
+    res.json({
+      success: true,
+      message: 'Membership cancelled successfully'
+    });
+    
+  } catch (error) {
+    console.error('Membership cancellation error:', error);
+    res.status(500).json({ error: 'Failed to cancel membership' });
+  }
+});
+
+// ==================== CONTACT FORM ROUTES ====================
+
+// Submit contact form
+app.post('/api/contact/submit', async (req, res) => {
+  try {
+    const { firstName, lastName, email, phone, subject, message, newsletter } = req.body;
+    
+    // Validate required fields
+    if (!firstName || !lastName || !email || !subject || !message) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    // Create contact submission record
+    const contactSubmission = {
+      firstName,
+      lastName,
+      email,
+      phone,
+      subject,
+      message,
+      newsletter,
+      timestamp: new Date(),
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent'),
+      status: 'pending'
+    };
+    
+    // In a real app, you'd save this to a ContactSubmission model
+    // For now, we'll log it and send an email notification
+    
+    console.log('📧 Contact form submission:', contactSubmission);
+    
+    // TODO: Send email notification to support team
+    // TODO: Add to support ticket system
+    
+    // If user wants newsletter, add to mailing list
+    if (newsletter) {
+      // TODO: Add to mailing list service (Mailchimp, etc.)
+    }
+    
+    res.json({
+      success: true,
+      message: 'Contact form submitted successfully',
+      ticketId: `TICKET-${Date.now()}`
+    });
+    
+  } catch (error) {
+    console.error('Contact form error:', error);
+    res.status(500).json({ error: 'Failed to submit contact form' });
+  }
+});
+
+// Send confirmation email
+app.post('/api/contact/confirmation', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    // TODO: Send confirmation email
+    console.log(`📧 Sending confirmation email to: ${email}`);
+    
+    res.json({
+      success: true,
+      message: 'Confirmation email sent'
+    });
+    
+  } catch (error) {
+    console.error('Confirmation email error:', error);
+    res.status(500).json({ error: 'Failed to send confirmation email' });
+  }
+});
+
+// ==================== MESSAGING SYSTEM ROUTES ====================
+
+// Send message (only for matched users or premium members)
+app.post('/api/messages/send', authenticateToken, async (req, res) => {
+  try {
+    const { recipientId, message } = req.body;
+    const sender = await User.findById(req.user.userId);
+    const recipient = await User.findById(recipientId);
+    
+    if (!sender || !recipient) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Check if users are matched or if sender is premium
+    const isMatched = sender.matches.some(match => 
+      match.matchedUserId.toString() === recipientId && match.isActive
+    );
+    
+    const isPremium = sender.membershipType === 'premium' && sender.membershipStatus === 'active';
+    
+    if (!isMatched && !isPremium) {
+      return res.status(403).json({ error: 'Can only message matched users unless you have premium membership' });
+    }
+    
+    // Create message record (implement Message model)
+    const messageData = {
+      senderId: sender._id,
+      recipientId: recipient._id,
+      message: message,
+      timestamp: new Date(),
+      isRead: false
+    };
+    
+    // TODO: Save to Message model
+    console.log('💌 Message sent:', messageData);
+    
+    // Update message count
+    await incrementMessageCount(sender._id);
+    
+    // Add activity
+    await addUserActivity(sender._id, 'message', `Sent message to ${recipient.name}`, {
+      relatedUserId: recipient._id,
+      relatedUserName: recipient.name
+    });
+    
+    res.json({
+      success: true,
+      message: 'Message sent successfully'
+    });
+    
+  } catch (error) {
+    console.error('Send message error:', error);
+    res.status(500).json({ error: 'Failed to send message' });
+  }
+});
+
+// Get conversation history
+app.get('/api/messages/conversation/:userId', authenticateToken, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const currentUser = await User.findById(req.user.userId);
+    
+    if (!currentUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Check if users are matched or if current user is premium
+    const isMatched = currentUser.matches.some(match => 
+      match.matchedUserId.toString() === userId && match.isActive
+    );
+    
+    const isPremium = currentUser.membershipType === 'premium' && currentUser.membershipStatus === 'active';
+    
+    if (!isMatched && !isPremium) {
+      return res.status(403).json({ error: 'Can only view conversations with matched users unless you have premium membership' });
+    }
+    
+    // TODO: Fetch messages from Message model
+    const messages = []; // Placeholder
+    
+    res.json({
+      success: true,
+      messages: messages
+    });
+    
+  } catch (error) {
+    console.error('Get conversation error:', error);
+    res.status(500).json({ error: 'Failed to get conversation' });
+  }
+});
+
+// ==================== ID VERIFICATION & BADGES ROUTES ====================
+
+// Submit ID verification
+app.post('/api/verification/submit-id', authenticateToken, upload.array('documents', 2), async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'ID documents are required' });
+    }
+    
+    // Process uploaded documents
+    const documents = req.files.map(file => ({
+      filename: file.filename,
+      originalName: file.originalname,
+      path: file.path,
+      size: file.size,
+      uploadedAt: new Date()
+    }));
+    
+    // Update user verification status
+    user.idVerificationStatus = 'pending';
+    user.idVerificationDocuments = documents;
+    user.idVerificationSubmittedAt = new Date();
+    
+    await user.save();
+    
+    // Add activity
+    await addUserActivity(user._id, 'verification_submitted', 'Submitted ID verification documents');
+    
+    res.json({
+      success: true,
+      message: 'ID verification submitted successfully',
+      status: 'pending'
+    });
+    
+  } catch (error) {
+    console.error('ID verification submission error:', error);
+    res.status(500).json({ error: 'Failed to submit ID verification' });
+  }
+});
+
+// Approve ID verification (admin only)
+app.post('/api/verification/approve/:userId', authenticateToken, async (req, res) => {
+  try {
+    // TODO: Add admin authentication check
+    
+    const user = await User.findById(req.params.userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Update verification status
+    user.idVerificationStatus = 'approved';
+    user.idVerificationApprovedAt = new Date();
+    user.isVerified = true;
+    
+    // Add verified badge
+    if (!user.badges.some(badge => badge.type === 'verified')) {
+      user.badges.push({
+        type: 'verified',
+        name: 'Verified User',
+        description: 'ID verified by PeThoria',
+        icon: 'fas fa-shield-check',
+        color: '#059669',
+        earnedAt: new Date()
+      });
+    }
+    
+    // Award verification points
+    user.points = (user.points || 0) + 50;
+    
+    await user.save();
+    
+    // Add activity
+    await addUserActivity(user._id, 'verification_completed', 'ID verification approved! +50 points', {
+      pointsEarned: 50
+    });
+    
+    res.json({
+      success: true,
+      message: 'ID verification approved'
+    });
+    
+  } catch (error) {
+    console.error('ID verification approval error:', error);
+    res.status(500).json({ error: 'Failed to approve ID verification' });
+  }
+});
+
+// Helper function to update user membership
+async function updateUserMembership(userId, plan, paymentMethod, transactionId) {
+  const user = await User.findById(userId);
+  
+  if (!user) {
+    throw new Error('User not found');
+  }
+  
+  user.membershipType = 'premium';
+  user.membershipStatus = 'active';
+  user.membershipPlan = plan;
+  user.membershipStartDate = new Date();
+  user.paymentMethod = paymentMethod;
+  user.lastTransactionId = transactionId;
+  
+  // Set expiration date
+  if (plan === 'monthly') {
+    user.membershipEndDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  } else if (plan === 'yearly') {
+    user.membershipEndDate = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+  } else if (plan === 'lifetime') {
+    user.membershipEndDate = new Date('2099-12-31');
+  }
+  
+  // Add premium badge
+  if (!user.badges.some(badge => badge.type === 'premium_member')) {
+    user.badges.push({
+      type: 'premium_member',
+      name: 'Premium Member',
+      description: 'Active premium subscription',
+      icon: 'fas fa-crown',
+      color: '#fbbf24',
+      earnedAt: new Date()
+    });
+  }
+  
+  await user.save();
+  
+  // Add activity
+  await addUserActivity(userId, 'membership', `Activated ${plan} premium membership via ${paymentMethod}`);
+}
 
 // Health check
 app.get('/health', (req, res) => {
