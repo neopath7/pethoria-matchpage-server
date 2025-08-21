@@ -11,7 +11,8 @@ const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const multer = require('multer');
 const path = require('path');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const paypal = require('paypal-rest-sdk');
+const { Client, Environment } = require('square');
 const redis = require('redis');
 require('dotenv').config();
 
@@ -36,6 +37,19 @@ app.set('trust proxy', 1); // Trust first proxy (Koyeb load balancer)
 
 // Google OAuth client
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// Initialize PayPal
+paypal.configure({
+  'mode': process.env.NODE_ENV === 'production' ? 'live' : 'sandbox',
+  'client_id': process.env.PAYPAL_CLIENT_ID,
+  'client_secret': process.env.PAYPAL_CLIENT_SECRET
+});
+
+// Initialize Square client
+const squareClient = new Client({
+  accessToken: process.env.SQUARE_ACCESS_TOKEN,
+  environment: process.env.NODE_ENV === 'production' ? Environment.Production : Environment.Sandbox
+});
 
 // Configure multer for file uploads
 const storage = multer.memoryStorage();
