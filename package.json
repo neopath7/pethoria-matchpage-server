@@ -23,7 +23,9 @@
     "axios": "^1.5.0",
     "redis": "^4.6.8",
     "google-auth-library": "^9.2.0",
-    "multer": "^1.4.5-lts.1"
+    "multer": "^1.4.5-lts.1",
+    "paypal-rest-sdk": "^1.8.1",
+    "square": "^39.1.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
