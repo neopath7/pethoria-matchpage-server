@@ -19,18 +19,109 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 8000;
 
+// Graceful shutdown handler
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  if (redisClient) {
+    redisClient.quit();
+  }
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  if (redisClient) {
+    redisClient.quit();
+  }
+  process.exit(0);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  console.log('App will continue running...');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  console.log('App will continue running...');
+});
+
 // Initialize Redis client
 let redisClient;
-try {
-  redisClient = redis.createClient({
-    url: process.env.REDIS_URL || 'redis://localhost:6379'
-  });
-  redisClient.connect();
-  console.log('✅ Redis connected successfully');
-} catch (error) {
-  console.log('⚠️ Redis connection failed, using memory cache fallback');
+if (process.env.REDIS_URL) {
+  try {
+    redisClient = redis.createClient({
+      url: process.env.REDIS_URL
+    });
+    redisClient.connect().then(() => {
+      console.log('✅ Redis connected successfully');
+    }).catch((error) => {
+      console.log('⚠️ Redis connection failed, using memory cache fallback');
+      redisClient = null;
+    });
+  } catch (error) {
+    console.log('⚠️ Redis initialization failed, using memory cache fallback');
+    redisClient = null;
+  }
+} else {
+  console.log('ℹ️ No Redis URL provided, using memory cache fallback');
   redisClient = null;
 }
+
+// Redis caching utilities
+const cacheUtils = {
+  // Set cache with TTL (Time To Live)
+  async set(key, value, ttl = 300) { // Default 5 minutes
+    if (!redisClient) return false;
+    try {
+      await redisClient.setEx(key, ttl, JSON.stringify(value));
+      return true;
+    } catch (error) {
+      console.log('Redis set error:', error.message);
+      return false;
+    }
+  },
+
+  // Get cache
+  async get(key) {
+    if (!redisClient) return null;
+    try {
+      const data = await redisClient.get(key);
+      return data ? JSON.parse(data) : null;
+    } catch (error) {
+      console.log('Redis get error:', error.message);
+      return null;
+    }
+  },
+
+  // Delete cache
+  async del(key) {
+    if (!redisClient) return false;
+    try {
+      await redisClient.del(key);
+      return true;
+    } catch (error) {
+      console.log('Redis del error:', error.message);
+      return false;
+    }
+  },
+
+  // Clear user cache
+  async clearUserCache(userId) {
+    if (!redisClient) return false;
+    try {
+      const keys = await redisClient.keys(`user:${userId}:*`);
+      if (keys.length > 0) {
+        await redisClient.del(keys);
+      }
+      return true;
+    } catch (error) {
+      console.log('Redis clear user cache error:', error.message);
+      return false;
+    }
+  }
+};
 
 // Trust proxy - CRITICAL for Koyeb deployment
 app.set('trust proxy', 1); // Trust first proxy (Koyeb load balancer)
@@ -73,6 +164,94 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(requestIp.mw());
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development',
+    redis: redisClient ? 'connected' : 'not connected',
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'not connected'
+  });
+});
+
+// Redis test endpoint
+app.get('/api/redis/test', async (req, res) => {
+  try {
+    if (!redisClient) {
+      return res.status(503).json({
+        status: 'error',
+        message: 'Redis not available',
+        redis: 'not connected'
+      });
+    }
+
+    // Test Redis operations
+    const testKey = 'test:redis:connection';
+    const testData = { message: 'Hello Redis!', timestamp: new Date().toISOString() };
+    
+    // Test set
+    const setResult = await cacheUtils.set(testKey, testData, 60);
+    if (!setResult) {
+      throw new Error('Failed to set cache');
+    }
+
+    // Test get
+    const getResult = await cacheUtils.get(testKey);
+    if (!getResult) {
+      throw new Error('Failed to get cache');
+    }
+
+    // Test delete
+    const delResult = await cacheUtils.del(testKey);
+    if (!delResult) {
+      throw new Error('Failed to delete cache');
+    }
+
+    res.json({
+      status: 'success',
+      message: 'Redis is working correctly!',
+      redis: 'connected',
+      tests: {
+        set: 'passed',
+        get: 'passed',
+        delete: 'passed'
+      },
+      data: testData
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: 'Redis test failed',
+      error: error.message,
+      redis: redisClient ? 'connected' : 'not connected'
+    });
+  }
+});
+
+// Redis status endpoint
+app.get('/api/redis/status', (req, res) => {
+  res.json({
+    status: 'success',
+    redis: {
+      connected: redisClient ? true : false,
+      url: process.env.REDIS_URL ? 'configured' : 'not configured',
+      environment: process.env.NODE_ENV || 'development'
+    },
+    cache: {
+      enabled: redisClient ? true : false,
+      ttl: '5 minutes (300 seconds)',
+      features: [
+        'User profile caching',
+        'Cache invalidation on updates',
+        'Automatic fallback to database'
+      ]
+    }
+  });
+});
+
 // Rate limiting - TEMPORARILY DISABLED to fix proxy issues
 // const limiter = rateLimit({
 //   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -83,14 +262,22 @@ app.use(requestIp.mw());
 //   skip: (req) => {
 //     // Skip rate limiting for health checks
 //     return req.path === '/health';
+//     //   }
 //   }
 // });
 // app.use(limiter);
 
 // MongoDB connection
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('MongoDB connection error:', err));
+if (process.env.MONGODB_URI) {
+  mongoose.connect(process.env.MONGODB_URI)
+    .then(() => console.log('✅ MongoDB connected successfully'))
+    .catch(err => {
+      console.error('❌ MongoDB connection error:', err);
+      console.log('⚠️ App will continue without database connection');
+    });
+} else {
+  console.log('ℹ️ No MongoDB URI provided, app will run without database');
+}
 
 // Enhanced User Schema
 const userSchema = new mongoose.Schema({
@@ -447,6 +634,16 @@ app.post('/api/auth/google', async (req, res) => {
 // Get user profile
 app.get('/api/profile/me', authenticateToken, async (req, res) => {
   try {
+    const cacheKey = `user:${req.user.userId}:profile`;
+    
+    // Try to get from cache first
+    const cachedProfile = await cacheUtils.get(cacheKey);
+    if (cachedProfile) {
+      console.log('📦 Profile served from Redis cache');
+      return res.json(cachedProfile);
+    }
+
+    // If not in cache, fetch from database
     const user = await User.findById(req.user.userId).select('-password');
     
     if (!user) {
@@ -456,7 +653,7 @@ app.get('/api/profile/me', authenticateToken, async (req, res) => {
       });
     }
 
-    res.json({
+    const profileData = {
       success: true,
       user: {
         id: user._id,
@@ -486,7 +683,13 @@ app.get('/api/profile/me', authenticateToken, async (req, res) => {
         createdAt: user.createdAt,
         lastActive: user.lastActive
       }
-    });
+    };
+
+    // Cache the profile for 5 minutes
+    await cacheUtils.set(cacheKey, profileData, 300);
+    console.log('💾 Profile cached in Redis');
+
+    res.json(profileData);
 
   } catch (error) {
     console.error('Get profile error:', error);
@@ -648,6 +851,10 @@ app.put('/api/profile/update', authenticateToken, upload.single('profilePicture'
 
     // Add profile update activity
     await addUserActivity(userId, 'profile_updated', 'Profile information updated');
+
+    // Clear user cache after profile update
+    await cacheUtils.clearUserCache(userId);
+    console.log('🗑️ User cache cleared after profile update');
 
     res.json({
       success: true,
