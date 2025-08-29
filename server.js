@@ -51,17 +51,53 @@ process.on('unhandledRejection', (reason, promise) => {
 let redisClient;
 if (process.env.REDIS_URL) {
   try {
+    console.log('🔗 Attempting Redis connection to:', process.env.REDIS_URL.replace(/:[^:@]*@/, ':****@'));
+    
     redisClient = redis.createClient({
-      url: process.env.REDIS_URL
+      url: process.env.REDIS_URL,
+      socket: {
+        connectTimeout: 10000, // 10 seconds
+        lazyConnect: true,
+        reconnectStrategy: (retries) => {
+          if (retries > 10) {
+            console.log('❌ Redis max reconnection attempts reached');
+            return false;
+          }
+          return Math.min(retries * 100, 3000);
+        }
+      }
     });
-    redisClient.connect().then(() => {
+
+    // Handle Redis events
+    redisClient.on('error', (err) => {
+      console.error('❌ Redis error:', err.message);
+      redisClient = null;
+    });
+
+    redisClient.on('connect', () => {
+      console.log('🔗 Redis connecting...');
+    });
+
+    redisClient.on('ready', () => {
       console.log('✅ Redis connected successfully');
+    });
+
+    redisClient.on('end', () => {
+      console.log('🔌 Redis connection ended');
+      redisClient = null;
+    });
+
+    // Attempt connection
+    redisClient.connect().then(() => {
+      console.log('✅ Redis connection established');
     }).catch((error) => {
-      console.log('⚠️ Redis connection failed, using memory cache fallback');
+      console.error('❌ Redis connection failed:', error.message);
+      console.log('⚠️ Using memory cache fallback');
       redisClient = null;
     });
   } catch (error) {
-    console.log('⚠️ Redis initialization failed, using memory cache fallback');
+    console.error('❌ Redis initialization failed:', error.message);
+    console.log('⚠️ Using memory cache fallback');
     redisClient = null;
   }
 } else {
@@ -183,7 +219,8 @@ app.get('/api/redis/test', async (req, res) => {
       return res.status(503).json({
         status: 'error',
         message: 'Redis not available',
-        redis: 'not connected'
+        redis: 'not connected',
+        reason: 'Redis client not initialized'
       });
     }
 
@@ -226,7 +263,12 @@ app.get('/api/redis/test', async (req, res) => {
       status: 'error',
       message: 'Redis test failed',
       error: error.message,
-      redis: redisClient ? 'connected' : 'not connected'
+      redis: redisClient ? 'connected' : 'not connected',
+      details: {
+        hasRedisClient: !!redisClient,
+        redisUrl: process.env.REDIS_URL ? 'configured' : 'not configured',
+        environment: process.env.NODE_ENV || 'development'
+      }
     });
   }
 });
