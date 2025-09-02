@@ -332,7 +332,8 @@ const userSchema = new mongoose.Schema({
   gender: { type: String, enum: ['male', 'female', 'other'] },
   location: {
     type: { type: String, enum: ['Point'], default: 'Point' },
-    coordinates: { type: [Number], default: [0, 0], required: true }, // [longitude, latitude]
+    // Not required at signup; user can set later from match filters or profile
+    coordinates: { type: [Number], required: false }, // [longitude, latitude]
     address: { type: String },
     city: { type: String },
     state: { type: String },
@@ -618,51 +619,12 @@ app.post('/api/auth/google', async (req, res) => {
       // Add login activity
       await addUserActivity(user._id, 'login', 'Signed in to PeThoria');
     } else {
-      // Create new user with location based on client IP if consented
-      const { useLocation } = req.body || {};
-      // Start with a safe default that always satisfies schema
-      let resolvedLocation = {
-        coordinates: [0, 0],
-        address: useLocation ? 'Location unavailable' : 'Location not shared',
-        city: '',
-        state: '',
-        country: ''
-      };
-      try {
-        if (useLocation) {
-          const clientIp = req.clientIp;
-          const ipLoc = await getLocationFromIP(clientIp);
-          if (ipLoc && Array.isArray(ipLoc.coordinates) && ipLoc.coordinates.length === 2) {
-            const lon = Number(ipLoc.coordinates[0]);
-            const lat = Number(ipLoc.coordinates[1]);
-            if (!Number.isNaN(lon) && !Number.isNaN(lat)) {
-              resolvedLocation = {
-                coordinates: [lon, lat],
-                address: ipLoc.address || resolvedLocation.address,
-                city: ipLoc.city || '',
-                state: ipLoc.state || '',
-                country: ipLoc.country || ''
-              };
-            }
-          }
-        }
-      } catch (error) {
-        console.log('IP-based geolocation failed, using default coordinates [0,0]');
-      }
-
+      // Create new user WITHOUT setting location at signup
       user = new User({
         email,
         name,
         googleId,
         profilePicture: picture,
-        location: {
-          type: 'Point',
-          coordinates: Array.isArray(resolvedLocation.coordinates) && resolvedLocation.coordinates.length === 2 ? resolvedLocation.coordinates : [0, 0],
-          address: resolvedLocation.address,
-          city: resolvedLocation.city,
-          state: resolvedLocation.state,
-          country: resolvedLocation.country
-        },
         points: 50, // Welcome bonus
         lastActive: new Date()
       });
