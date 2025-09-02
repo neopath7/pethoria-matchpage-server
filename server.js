@@ -618,9 +618,29 @@ app.post('/api/auth/google', async (req, res) => {
       // Add login activity
       await addUserActivity(user._id, 'login', 'Signed in to PeThoria');
     } else {
-      // Create new user with default location
-      const defaultLocation = await getLocationFromIP('8.8.8.8'); // Default to fallback location
-      
+      // Create new user with location based on client IP if consented
+      const { useLocation } = req.body || {};
+      let resolvedLocation;
+      try {
+        if (useLocation) {
+          const clientIp = req.clientIp;
+          resolvedLocation = await getLocationFromIP(clientIp);
+        }
+      } catch (error) {
+        console.log('IP-based geolocation failed, applying neutral location');
+      }
+
+      // Ensure we always provide required coordinates field
+      if (!resolvedLocation || !resolvedLocation.coordinates) {
+        resolvedLocation = {
+          coordinates: [0, 0],
+          address: useLocation ? 'Location unavailable' : 'Location not shared',
+          city: '',
+          state: '',
+          country: ''
+        };
+      }
+
       user = new User({
         email,
         name,
@@ -628,11 +648,11 @@ app.post('/api/auth/google', async (req, res) => {
         profilePicture: picture,
         location: {
           type: 'Point',
-          coordinates: defaultLocation.coordinates,
-          address: defaultLocation.address,
-          city: defaultLocation.city,
-          state: defaultLocation.state,
-          country: defaultLocation.country
+          coordinates: resolvedLocation.coordinates,
+          address: resolvedLocation.address,
+          city: resolvedLocation.city,
+          state: resolvedLocation.state,
+          country: resolvedLocation.country
         },
         points: 50, // Welcome bonus
         lastActive: new Date()
