@@ -620,25 +620,34 @@ app.post('/api/auth/google', async (req, res) => {
     } else {
       // Create new user with location based on client IP if consented
       const { useLocation } = req.body || {};
-      let resolvedLocation;
+      // Start with a safe default that always satisfies schema
+      let resolvedLocation = {
+        coordinates: [0, 0],
+        address: useLocation ? 'Location unavailable' : 'Location not shared',
+        city: '',
+        state: '',
+        country: ''
+      };
       try {
         if (useLocation) {
           const clientIp = req.clientIp;
-          resolvedLocation = await getLocationFromIP(clientIp);
+          const ipLoc = await getLocationFromIP(clientIp);
+          if (ipLoc && Array.isArray(ipLoc.coordinates) && ipLoc.coordinates.length === 2) {
+            const lon = Number(ipLoc.coordinates[0]);
+            const lat = Number(ipLoc.coordinates[1]);
+            if (!Number.isNaN(lon) && !Number.isNaN(lat)) {
+              resolvedLocation = {
+                coordinates: [lon, lat],
+                address: ipLoc.address || resolvedLocation.address,
+                city: ipLoc.city || '',
+                state: ipLoc.state || '',
+                country: ipLoc.country || ''
+              };
+            }
+          }
         }
       } catch (error) {
-        console.log('IP-based geolocation failed, applying neutral location');
-      }
-
-      // Ensure we always provide required coordinates field
-      if (!resolvedLocation || !resolvedLocation.coordinates) {
-        resolvedLocation = {
-          coordinates: [0, 0],
-          address: useLocation ? 'Location unavailable' : 'Location not shared',
-          city: '',
-          state: '',
-          country: ''
-        };
+        console.log('IP-based geolocation failed, using default coordinates [0,0]');
       }
 
       user = new User({
