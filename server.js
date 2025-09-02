@@ -332,7 +332,7 @@ const userSchema = new mongoose.Schema({
   gender: { type: String, enum: ['male', 'female', 'other'] },
   location: {
     type: { type: String, enum: ['Point'], default: 'Point' },
-    coordinates: { type: [Number], required: true }, // [longitude, latitude]
+    coordinates: { type: [Number], default: [0, 0], required: true }, // [longitude, latitude]
     address: { type: String },
     city: { type: String },
     state: { type: String },
@@ -657,7 +657,7 @@ app.post('/api/auth/google', async (req, res) => {
         profilePicture: picture,
         location: {
           type: 'Point',
-          coordinates: resolvedLocation.coordinates,
+          coordinates: Array.isArray(resolvedLocation.coordinates) && resolvedLocation.coordinates.length === 2 ? resolvedLocation.coordinates : [0, 0],
           address: resolvedLocation.address,
           city: resolvedLocation.city,
           state: resolvedLocation.state,
